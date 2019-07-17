@@ -8,12 +8,10 @@ RUN apt-get update -y && apt-get upgrade -y && apt install -y tesseract-ocr
 
 WORKDIR /workdir
 
-COPY ./out/artifacts/clin_pdf_search_jar/clin-pdf-search.jar .
-
-COPY ./nlp nlp
+COPY ./classes/artifacts/circare_jar/circare.jar .
 
 COPY ./tessdata tessdata
 
-ENTRYPOINT ["java", "-jar", "clin-pdf-search.jar"]
+ENTRYPOINT ["java", "-jar", "circare.jar"]
 
 # https://stackoverflow.com/questions/41185591/jar-file-with-arguments-in-docker

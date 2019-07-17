@@ -7,6 +7,8 @@ Lorsqu'on index en admin, ne pas donner d'analyseur à ES (quand il y en a un il
 quoi le contenu; on veut pas optimiser pour la recherche!)
 
 
+docker run -ti -v $PWD/src:/workdir busybox ls /workdir
+
 pipe direct de futures indexage: 67s/20doc
 enlevé support pour fra et spa: 50s
 Futures partout + future englobant (donc deux await): 40s!!

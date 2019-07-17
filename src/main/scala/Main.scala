@@ -1,65 +1,28 @@
-import play.api.libs.json.{JsArray, JsObject, JsString, JsValue}
-
 import scala.annotation.tailrec
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, Future}
 
 object Main {
 
   var argMap: Map[String, String] = _
 
-  def index(): Future[Iterator[Unit]] = {
-    val OCRParser = new OCRParser()
-    val S3Downloader = new S3Downloader
-    val NLPParser = new NLPParser
-    val ESIndexer = new ESIndexer(argMap("esurl"))
-    val SQL = new SQLConn(argMap("psqlhost"), argMap("psqluser"), argMap("psqlpass"))
+  def index() = {
 
-    var nbDone = 1
-    var lastPrintLength = 0
-    val nbCores = Runtime.getRuntime.availableProcessors()
-
-    Future.traverse(SQL.getPDFAndParticipants()) { pdfPart =>
-      Future{
-
-        val participant = pdfPart(1).as[JsObject]
-        val pdfs = pdfPart(0).as[Array[JsObject]]
-
-        val parsed = pdfs.map{ pdf =>
-
-          val text = OCRParser.parsePDF(S3Downloader.download("s3://kf-study-us-east-1-prd-sd-bhjxbdqk/", pdf("pdf_key").as[String]))
-          val words = NLPParser.getLemmas(text).map(JsString)
-
-          (participant + ("pdf_text" -> JsString(text)) + ("pdf_words" -> JsArray(words)) ++ pdf).toString()
-
-        }
-
-        ESIndexer.bulkIndex(parsed)
-
-        val toPrint = s"Approx. number of participants done: ${nbDone/nbCores}"
-        lastPrintLength = toPrint.length
-        nbDone += 1
-
-        println("\b"*lastPrintLength)
-        println(toPrint)
-      }
-    }
   }
 
   def main(args: Array[String]) {
     argMap = {
       val defaults = Map[String, String](
         "esurl" -> "http://localhost:9200",
-        "endurl" -> "limit=100&visible=true",
-        "psqlhost" -> "",
-        "psqlpass" -> "",
-        "psqluser" -> ""
+        "singleindex" -> "",
+        "languages" -> "eng",
       )
 
       if (args.contains("--help") || args.contains("--h") || args.contains("-help") || args.contains("-h")) {
-        println("Specify your arguments using this notation => arg:value.\nValues you can specify and their defaults (you must specify all empty defaults):")
-        defaults.foreach( kv => println(s"""${kv._1}:${kv._2}"""))
+        println("Specify your arguments using this notation => arg:value.")
+        println("Values you can specify and their defaults:")
+        defaults.foreach( kv => println(s"\t${kv._1}:${kv._2}"))
+        println("If singleindex is empty, a new index will be created for every subfolder in the directory.")
+        println("The input folder can contain other folders. However, if it does, it can only contain folders, and those folders can only contain PDFs.")
+        println("Otherwise, if the input folder only contains PDFs, indexation will be started with the input folder as the index name (or singleindex, if specified)")
         System.exit(0)
       }
 
@@ -76,18 +39,16 @@ object Main {
           mapFromArgsIter(argList.tail, argMap + (key -> value))
       }
 
-      val argMap = mapFromArgsIter(args, defaults)
-
-      argMap.values.foreach{ v =>
-        if(v.equals("")) throw new Exception("You must specify all sensitive values (psqlhost, psqlpass, psqluser)")
-      }
-
-      argMap
+      mapFromArgsIter(args, defaults)
     }
 
     val startTime = System.currentTimeMillis()
 
-    Await.result(index(), Duration.Inf)
+    val OCRParser = new OCRParser(argMap("languages"))
+    Walker.walk("input").foreach{ pdfFile =>
+      println(OCRParser.parsePDF(pdfFile))
+    }
+    //Await.result(index(), Duration.Inf)
     //new SQLConn(argMap("psqlhost"), argMap("psqluser"), argMap("psqlpass")).printPDFAndParticipants()
 
     println("took " + (System.currentTimeMillis() - startTime) / 1000 + " seconds")
