@@ -98,6 +98,8 @@ class ESIndexer(url: String = "http://localhost:9200") {
     request
   }
 
+  def index(req: String): Unit = esClient.index(makeIndexRequest(req), RequestOptions.DEFAULT)
+
   def bulkIndex(reqs: Seq[String]): Unit = {
 
     val bulked = new BulkRequest()

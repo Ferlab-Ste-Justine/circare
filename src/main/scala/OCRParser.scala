@@ -17,6 +17,9 @@ class OCRParser(languages: String = "eng") {
   CLibrary.INSTANCE.setlocale(CLibrary.LC_NUMERIC, "C")
   CLibrary.INSTANCE.setlocale(CLibrary.LC_CTYPE, "C")
 
+  import sys.process._  //TODO RM
+  "printenv" !
+
   /**
     * Syntactic sugar for parsePDF(pdf: Stream)
     *
