@@ -1,78 +1,97 @@
-import java.io.File
+import java.io.{ByteArrayOutputStream, PrintStream}
 
-import play.api.libs.json.{JsArray, JsObject, JsString, JsValue, Json}
+import play.api.libs.json.{JsArray, JsObject, JsString, Json}
 
 import scala.annotation.tailrec
-import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, Future}
 
 object Main {
 
-  case class ArgMap(esurl: String = "http://localhost:9200", singleindex: String = "", languages: String = "eng", sep: String = ",")
+  case class ArgMap(esurl: String = "http://localhost:9200", esindex: String = "qsearch", languages: String = "eng", sep: String = ",", printascsv: String = "false")
 
   var argMap: ArgMap = _
 
-  def main(args: Array[String]) {
-    argMap = {
+  def init(args: Array[String]): Unit = {
+    //GRABBING ARGS FROM CLI INTO CASE CLASS
+    import CaseClassUtils._
 
-      val defaultsMap = Map("esurl" -> "http://localhost:9200", "singleindex" -> "", "languages" -> "eng", "sep" -> ",")
+    val defaultsMap = ArgMap().toMap
 
-      println(s"You entered these arguments: ${args.mkString(" ")}")
+    println(s"You entered these arguments: ${args.mkString(" ")}")
 
-      if (args.contains("--help") || args.contains("--h") || args.contains("-help") || args.contains("-h")) {
-        println("Specify your arguments using this notation => arg:value.")
-        println("Values you can specify and their defaults:")
-        defaultsMap.foreach{ case (k, v) => println(s"\t$k:$v") }
-        println("If singleindex is empty, a new index will be created for every subfolder in the directory.")
-        println("The input folder can contain other folders. However, if it does, it can only contain folders, and those folders can only contain PDFs.")
-        println("Otherwise, if the input folder only contains PDFs, indexation will be started with the input folder as the index name (or singleindex, if specified)")
-        System.exit(0)
-      }
+    if (args.contains("--help") || args.contains("--h") || args.contains("-help") || args.contains("-h")) {
+      println("Specify your arguments using this notation => arg:value.")
+      println("Values you can specify and their defaults:")
+      defaultsMap.foreach{ case (k, v) => println(s"\t$k:$v") }
+      println("Special notes about some of these arguments:")
+      printtab("languages: must be of form lang1+lang2+lang3. Currently, only fra, eng, and osd are supported.\nThe more languages, the slower the OCR is.")
+      printtab("sep: sep is used for ALL CSV files")
+      printtab("verbose: true of false")
+      printtab("printascsv: if true, will print the indexed json as a CSV using the provided sep. Do note that json arrays will stay json arrays.\nIf false, prints as json")
 
-      @tailrec
-      def mapFromArgsIter(argList: Array[String], argMap: Map[String, String]): Map[String, String] = argList match {
-        case Array() => argMap
-        case Array(h: String, _*) =>
-          val firstColon =  h.indexOf(":")
-          val key = h.substring(0, firstColon)
-          val value = h.substring(firstColon+1, h.length)
-
-          if(!defaultsMap.contains(key)) throw new Exception(s"Unrecognized argument: $key")
-
-          mapFromArgsIter(argList.tail, argMap + (key -> value))
-      }
-
-      val valueMap = mapFromArgsIter(args, defaultsMap)
-
-      ArgMap(
-        singleindex = valueMap("singleindex"),
-        esurl = valueMap("esurl"),
-        languages = valueMap("languages"),
-        sep = valueMap("sep")
-      )
+      System.exit(0)
     }
+
+    @tailrec
+    def mapFromArgsIter(argList: Array[String], argMap: Map[String, String]): Map[String, String] = argList match {
+      case Array() => argMap
+      case Array(h: String, _*) =>
+        val firstColon =  h.indexOf(":")
+
+        if(firstColon == -1) throw new Exception(s"Unrecognized argument: $h")
+
+        val key = h.substring(0, firstColon)
+        val value = h.substring(firstColon+1, h.length)
+
+        if(!defaultsMap.contains(key)) throw new Exception(s"Unrecognized argument key: $key")
+
+        mapFromArgsIter(argList.tail, argMap + (key -> value))
+    }
+
+    argMap = ArgMap().fromMap(mapFromArgsIter(args, defaultsMap))
+
+    //DISABLING MOST LOGGING
+    import ch.qos.logback.classic.{Level, Logger}
+    import org.slf4j.LoggerFactory
+    //https://github.com/jfrog/artifactory-client-java/issues/77
+    val loggers = Seq(
+      "org.apache.http",
+      "org.apache.pdfbox.io.ScratchFileBuffer",
+      "org.apache.pdfbox.pdfparser.PDFObjectStreamParser",
+      "org.apache.pdfbox.pdmodel.font.PDType1Font",
+      "org.apache.fontbox.ttf.GlyphSubstitutionTable",
+      "org.apache.fontbox.util.autodetect.FontFileFinder",
+      "org.apache.pdfbox.pdmodel.font.PDType1Font",
+      "org.apache.pdfbox.pdmodel.graphics.color.PDDeviceRGB",
+      "org.apache.fontbox.ttf.PostScriptTable"
+    )
+
+    loggers.foreach { name =>
+      val logger = LoggerFactory.getLogger(name).asInstanceOf[Logger]
+      logger.setLevel(Level.INFO)
+      logger.setAdditive(false)
+    }
+
+    //DONE!
+  }
+
+  def main(args: Array[String]) {
+
+    init(args)
 
     val startTime = System.currentTimeMillis()
 
-    import java.nio.file.Path
-    import java.nio.file.Paths
-    val currentRelativePath = Paths.get("tessdata")
-    val s = currentRelativePath.toAbsolutePath.toString
-    System.out.println("Current relative path is: " + s)
-
-    import sys.process._
-    "ls" !
-
     index()
-    //Await.result(index(), Duration.Inf)
-    //new SQLConn(argMap("psqlhost"), argMap("psqluser"), argMap("psqlpass")).printPDFAndParticipants()
 
     println("took " + (System.currentTimeMillis() - startTime) / 1000 + " seconds")
     System.exit(0)
   }
 
-  def index() = {
+  def printtab(string: String): Unit = print(s"\t$string")
+
+  def index(): Unit = {
 
     val mapping = Future{
       val bufferedSource = io.Source.fromFile("input/mapping.csv")
@@ -124,7 +143,7 @@ object Main {
       ).map(files.map(_.getName()).zip(_).toMap)
     }
 
-    val temperino = clinicalData.flatMap{ pts => //map(pdf, pt)
+    val f = clinicalData.flatMap{ pts => //map(pdf, pt)
       mapping.flatMap{ ptPdfs => //map(pt, pt data)
         texts.map{ pdfs => //map(pdf, pdf text)
 
@@ -153,10 +172,21 @@ object Main {
       }
     }
 
-    val b = Await.result(temperino, Duration.Inf)
+    val done = Await.result(f, Duration.Inf)
 
-    b.foreach(println)
+    if(argMap.printascsv.equals("true")) {
 
-    val i = 0
+      val fields = done.head.keys
+
+      println(fields.mkString(argMap.sep))
+
+      done.foreach{ json =>
+        println(
+          fields.map(f => json(f).toString().replaceAll("^\"|\"$", "")).mkString(argMap.sep)
+        )
+      }
+
+    } else done.foreach(println)
+
   }
 }

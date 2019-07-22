@@ -1,5 +1,5 @@
-participant,pdf,data
-bob,default.pdf,male
-robert,Genelist_DG215_Nijmegen.pdf,tall
-Clarence,10.1.1.532.2506.pdf,small
-Anette,A unified statistical approach for determining significant signals.pdf,female
+participant,pdf,gender,height
+bob,default.pdf,male,small
+robert,Genelist_DG215_Nijmegen.pdf,male,tall
+Clarence,10.1.1.532.2506.pdf,unkown,unreported
+Anette,A unified statistical approach for determining significant signals.pdf,female,tall

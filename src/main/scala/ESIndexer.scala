@@ -10,6 +10,8 @@ import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.xcontent.XContentFactory._
 import org.elasticsearch.common.xcontent.XContentType
 
+import Main.argMap
+
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Promise}
 
@@ -30,7 +32,7 @@ class ESIndexer(url: String = "http://localhost:9200") {
   def initIndexes(): Unit = {
 
     val exists = new GetIndexRequest()
-    exists.indices("qsearch")
+    exists.indices(argMap.esindex)
 
     if (esClient.indices().exists(exists, RequestOptions.DEFAULT)) return //if index exists, stop
 
@@ -41,25 +43,15 @@ class ESIndexer(url: String = "http://localhost:9200") {
 
       jsonAdminFileLemma.startObject("properties")
 
-        jsonAdminFileLemma.startObject("pdf_text")
-        jsonAdminFileLemma.field("type", "text")
-        jsonAdminFileLemma.field("analyzer", "english") //use the custom analyser we're creating in jsonSettings
-        jsonAdminFileLemma.endObject()
+        jsonAdminFileLemma.startObject("pdfs")
 
-        jsonAdminFileLemma.startObject("pdf_words")
-        jsonAdminFileLemma.field("type", "keyword")
-        jsonAdminFileLemma.endObject()
+          jsonAdminFileLemma.startObject("properties")
+            jsonAdminFileLemma.startObject("pdf_text")
+            jsonAdminFileLemma.field("type", "text")
+            jsonAdminFileLemma.field("analyzer", "english") //use the custom analyser we're creating in jsonSettings
+            jsonAdminFileLemma.endObject()
+          jsonAdminFileLemma.endObject()
 
-        jsonAdminFileLemma.startObject("pdf_type")
-        jsonAdminFileLemma.field("type", "keyword")
-        jsonAdminFileLemma.endObject()
-
-        jsonAdminFileLemma.startObject("pdf_id")
-        jsonAdminFileLemma.field("type", "keyword")
-        jsonAdminFileLemma.endObject()
-
-        jsonAdminFileLemma.startObject("pdf_key")
-        jsonAdminFileLemma.field("type", "keyword")
         jsonAdminFileLemma.endObject()
 
       jsonAdminFileLemma.endObject()
@@ -67,7 +59,7 @@ class ESIndexer(url: String = "http://localhost:9200") {
     jsonAdminFileLemma.endObject()
     jsonAdminFileLemma.endObject()
 
-    val request = new CreateIndexRequest("qsearch")
+    val request = new CreateIndexRequest(argMap.esindex)
     request.mapping("_doc",
       Strings.toString(jsonAdminFileLemma),
       XContentType.JSON)
@@ -91,7 +83,7 @@ class ESIndexer(url: String = "http://localhost:9200") {
     * @return
     */
   private def makeIndexRequest(req: String) = {
-    val request = new IndexRequest("qsearch")
+    val request = new IndexRequest(argMap.esindex)
     request.`type`("_doc")
     request.source(req, XContentType.JSON)
 
