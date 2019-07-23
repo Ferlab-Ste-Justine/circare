@@ -1,4 +1,4 @@
-participant,pdf,gender,height
+participant_id,pdf,gender,height
 bob,default.pdf,male,small
 robert,Genelist_DG215_Nijmegen.pdf,male,tall
 Clarence,10.1.1.532.2506.pdf,unkown,unreported

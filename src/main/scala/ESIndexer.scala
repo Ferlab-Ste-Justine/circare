@@ -36,32 +36,44 @@ class ESIndexer(url: String = "http://localhost:9200") {
 
     if (esClient.indices().exists(exists, RequestOptions.DEFAULT)) return //if index exists, stop
 
-    val jsonAdminFileLemma = jsonBuilder
+    val props = jsonBuilder
 
-    jsonAdminFileLemma.startObject()
-    jsonAdminFileLemma.startObject("_doc")
+    props.startObject()
+    props.startObject("_doc")
 
-      jsonAdminFileLemma.startObject("properties")
+      props.startObject("properties")
 
-        jsonAdminFileLemma.startObject("pdfs")
+        props.startObject("pdfs")
 
-          jsonAdminFileLemma.startObject("properties")
-            jsonAdminFileLemma.startObject("pdf_text")
-            jsonAdminFileLemma.field("type", "text")
-            jsonAdminFileLemma.field("analyzer", "english") //use the custom analyser we're creating in jsonSettings
-            jsonAdminFileLemma.endObject()
-          jsonAdminFileLemma.endObject()
+          props.startObject("properties")
+            props.startObject("pdf_text")
+            props.field("type", "text")
+              props.startObject("fields")
 
-        jsonAdminFileLemma.endObject()
+              props.startObject("en")
+                props.field("type", "text")
+                props.field("analyzer", "english")
+              props.endObject()
 
-      jsonAdminFileLemma.endObject()
+              props.startObject("fr")
+                props.field("type", "text")
+                props.field("analyzer", "french")
+              props.endObject()
 
-    jsonAdminFileLemma.endObject()
-    jsonAdminFileLemma.endObject()
+              props.endObject()
+            props.endObject()
+          props.endObject()
+
+        props.endObject()
+
+      props.endObject()
+
+    props.endObject()
+    props.endObject()
 
     val request = new CreateIndexRequest(argMap.esindex)
     request.mapping("_doc",
-      Strings.toString(jsonAdminFileLemma),
+      Strings.toString(props),
       XContentType.JSON)
 
     request.settings(Settings.builder().put("index.number_of_shards", 1))

@@ -1,4 +1,4 @@
-import java.io.{ByteArrayOutputStream, PrintStream}
+import java.io.{ByteArrayOutputStream, File, PrintStream}
 
 import play.api.libs.json.{JsArray, JsObject, JsString, Json}
 
@@ -6,10 +6,12 @@ import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
+import scala.language.implicitConversions
 
 object Main {
 
-  case class ArgMap(esurl: String = "http://localhost:9200", esindex: String = "qsearch", languages: String = "eng", sep: String = ",", printascsv: String = "false")
+  case class ArgMap(esurl: String = "http://localhost:9200", esindex: String = "qsearch", languages: String = "eng",
+                    sep: String = ",", printascsv: String = "false", verbose: String = "true")
 
   var argMap: ArgMap = _
 
@@ -19,9 +21,9 @@ object Main {
 
     val defaultsMap = ArgMap().toMap
 
-    println(s"You entered these arguments: ${args.mkString(" ")}")
-
     if (args.contains("--help") || args.contains("--h") || args.contains("-help") || args.contains("-h")) {
+      def printtab(string: String): Unit = print(s"\t$string")
+
       println("Specify your arguments using this notation => arg:value.")
       println("Values you can specify and their defaults:")
       defaultsMap.foreach{ case (k, v) => println(s"\t$k:$v") }
@@ -65,7 +67,8 @@ object Main {
       "org.apache.fontbox.util.autodetect.FontFileFinder",
       "org.apache.pdfbox.pdmodel.font.PDType1Font",
       "org.apache.pdfbox.pdmodel.graphics.color.PDDeviceRGB",
-      "org.apache.fontbox.ttf.PostScriptTable"
+      "org.apache.fontbox.ttf.PostScriptTable",
+      "org.elasticsearch.client.RestClient"
     )
 
     loggers.foreach { name =>
@@ -78,115 +81,88 @@ object Main {
   }
 
   def main(args: Array[String]) {
-
     init(args)
-
-    val startTime = System.currentTimeMillis()
 
     index()
 
-    println("took " + (System.currentTimeMillis() - startTime) / 1000 + " seconds")
     System.exit(0)
   }
 
-  def printtab(string: String): Unit = print(s"\t$string")
-
   def index(): Unit = {
 
-    val mapping = Future{
-      val bufferedSource = io.Source.fromFile("input/mapping.csv")
+    def println(string: Any): Unit = if(argMap.verbose.equals("true")) scala.Predef.println(string)
+    def print(string: Any): Unit = if(argMap.verbose.equals("true")) scala.Predef.print(string)
+    def printtab(string: Any): Unit = print(s"\t$string")
+    def printtabln(string: Any): Unit = printtab(s"$string\n")
 
-      val lines: Iterator[String] = bufferedSource.getLines()
+    println("Reading mapping...")
 
-      lines.next()  //skip first line
+    val mapping = CSVUtils.readCSVSkip("input/mapping.csv", argMap.sep).foldLeft(Map[String, List[String]]()) { (acc, line) =>  //map(pt, List of pdf)
+      printtabln(line.mkString(","))
 
-      val map = lines.foldLeft(Map[String, List[String]]()) { (acc, line) =>  //map(pt, List of pdf)
-        val idPDF = line.split(argMap.sep)
-
-        if(acc.contains(idPDF(0))) acc + (idPDF(0) -> (idPDF(1) +: acc(idPDF(0))))
-        else acc + (idPDF(0) -> List(idPDF(1)))
-      }
-
-      bufferedSource.close
-
-      map
+      if(acc.contains(line(0))) acc + (line(0) -> (line(1) +: acc(line(0))))
+      else acc + (line(0) -> List(line(1)))
     }
 
-    val clinicalData = Future{  //map(pt, pt data)
-      val bufferedSource = io.Source.fromFile("input/clinicalData.csv")
+    println("Reading clinical data...")
 
-      val lines: Iterator[String] = bufferedSource.getLines()
+    val clinicalData = {  //map(pt, pt data)
+      val csv = CSVUtils.readCSV("input/clinicalData.csv", argMap.sep)
 
-      val fields = lines.next().split(argMap.sep)
+      val fields = csv.next()
 
-      val map = lines.foldLeft(Map[String, JsObject]()) { (acc, line) =>
-        val asJson = JsObject(fields.zip(line.split(argMap.sep).map(Json.toJson(_))))
-        acc + (asJson("participant").as[String] -> asJson)
+      csv.foldLeft(Map[String, JsObject]()) { (acc, line) =>
+        printtabln(line.mkString(","))
+
+        val asJson = JsObject(fields.zip(line.map(Json.toJson(_))))
+        acc + (asJson("participant_id").as[String] -> asJson)
       }
-
-      bufferedSource.close
-
-      map
     }
+
+    println("OCRing PDFs. This is an async operation.")
+    println("Final output will be printed in the requested format as we go")
+
+    var nbOfPDFsDone: Int = 0
+    val nbOfPDFs = mapping.values.toList.length
 
     val texts = { //map(pdf, pdf text)
       val OCRParser = new OCRParser(argMap.languages)
-
-      val files = Walker.walk("input")
+      val ESIndexer = new ESIndexer(argMap.esurl)
+      lazy val fields = clinicalData(clinicalData.keys.head).keys.toList :+ "pdfs" //the names of the columns needed if we print as csv
+      if(argMap.printascsv.equals("true")) println(fields.mkString(argMap.sep))
 
       Future.sequence(
-        files.map{ file =>
+        clinicalData.map{ case (p, pdata) =>
           Future{
-            OCRParser.parsePDF(file)
-          }
-        }
-      ).map(files.map(_.getName()).zip(_).toMap)
-    }
+            val ocred: JsArray = mapping(p).foldLeft(JsArray()){ (acc, f) =>
+              val file = new File("input/"+f)
 
-    val f = clinicalData.flatMap{ pts => //map(pdf, pt)
-      mapping.flatMap{ ptPdfs => //map(pt, pt data)
-        texts.map{ pdfs => //map(pdf, pdf text)
+              val text = OCRParser.parsePDF(file)
 
-          val ESIndexer = new ESIndexer(argMap.esurl)
-
-          pts.foldLeft(List[JsObject]()) { (acc, ptIdAndData) =>
-            val (ptID, ptData) = ptIdAndData
-
-            val listOfPdfs: List[String] = ptPdfs(ptID)
-
-            val thePDFs = listOfPdfs.foldLeft(JsArray()) { (array: JsArray, pdfId) =>
-              val x = Seq(
-                ("pdf_key", JsString(pdfId)),
-                ("pdf_text", JsString(pdfs(pdfId)))
-              )
-
-              JsObject(x) +: array
-
+              JsObject(
+                Seq(
+                  ("pdf_key", JsString(f)),
+                  ("pdf_text", JsString(text))
+                )
+              ) +: acc
             }
 
-            ESIndexer.index((ptData + ("pdfs" -> thePDFs)).toString())
+            val asJson = pdata + ("pdfs" -> ocred)
+            val asString = asJson.toString()
+            ESIndexer.index(asString)
 
-            (ptData + ("pdfs" -> thePDFs)) +: acc
+            if(argMap.printascsv.equals("false")) scala.Predef.println(asString)
+            else {
+              scala.Predef.println(
+                fields.map(asJson(_).toString().replaceAll("^\"|\"$", "")).mkString(argMap.sep)
+              )
+            }
           }
         }
-      }
+      )
     }
 
-    val done = Await.result(f, Duration.Inf)
-
-    if(argMap.printascsv.equals("true")) {
-
-      val fields = done.head.keys
-
-      println(fields.mkString(argMap.sep))
-
-      done.foreach{ json =>
-        println(
-          fields.map(f => json(f).toString().replaceAll("^\"|\"$", "")).mkString(argMap.sep)
-        )
-      }
-
-    } else done.foreach(println)
+    Await.result(texts, Duration.Inf)
 
   }
 }
