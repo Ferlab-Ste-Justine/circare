@@ -16,3 +16,7 @@ libraryDependencies += "com.typesafe.play" %% "play-json" % "2.7.3"
 libraryDependencies += "org.scala-lang" % "scala-compiler" % scalaVersion.value
 
 libraryDependencies += "org.scala-lang" % "scala-reflect" % scalaVersion.value
+
+libraryDependencies += "org.apache.pdfbox" % "jbig2-imageio" % "3.0.2"
+
+libraryDependencies += "org.apache.pdfbox" % "pdfbox" % "2.0.16"
